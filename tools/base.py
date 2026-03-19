@@ -25,8 +25,15 @@ create_deep_agent(tools=...)에 넘길 수 있습니다.
 """
 from __future__ import annotations
 
+import functools
+import logging
+import time
+from collections import Counter
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Any, Callable
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -38,11 +45,22 @@ class ToolEntry:
     description: str = ""
 
 
+@dataclass
+class ToolCallRecord:
+    """도구 호출 기록."""
+    tool_name: str
+    timestamp: datetime
+    duration_ms: float
+    success: bool
+    error: str | None = None
+
+
 class ToolRegistry:
     """도구 저장소. 싱글턴으로 사용."""
 
     def __init__(self) -> None:
         self._tools: dict[str, ToolEntry] = {}
+        self._call_log: list[ToolCallRecord] = []
 
     def register(
         self,
@@ -68,6 +86,7 @@ class ToolRegistry:
         desc = description or (func.__doc__ or "").strip()
         entry = ToolEntry(func=func, name=tool_name, tags=tags or [], description=desc)
         self._tools[tool_name] = entry
+        logger.info("도구 등록: '%s' (tags=%s)", tool_name, tags or [])
         return func
 
     def get(self, name: str) -> Callable:
@@ -98,9 +117,85 @@ class ToolRegistry:
             lines.append(f"  [{tags_str}] {name}: {entry.description[:60]}")
         return "\n".join(lines)
 
+    # ── 도구 사용 추적 ──
+
+    def wrap_with_tracking(self, func: Callable) -> Callable:
+        """도구 함수를 래핑하여 호출을 추적합니다."""
+        tool_name = getattr(func, "__name__", getattr(func, "name", "unknown"))
+
+        @functools.wraps(func)
+        def wrapper(*args: Any, **kwargs: Any) -> Any:
+            start = time.perf_counter()
+            try:
+                result = func(*args, **kwargs)
+                duration = (time.perf_counter() - start) * 1000
+                self._call_log.append(ToolCallRecord(
+                    tool_name=tool_name,
+                    timestamp=datetime.now(),
+                    duration_ms=round(duration, 2),
+                    success=True,
+                ))
+                logger.info("도구 호출 완료: '%s' (%.1fms)", tool_name, duration)
+                return result
+            except Exception as e:
+                duration = (time.perf_counter() - start) * 1000
+                self._call_log.append(ToolCallRecord(
+                    tool_name=tool_name,
+                    timestamp=datetime.now(),
+                    duration_ms=round(duration, 2),
+                    success=False,
+                    error=str(e),
+                ))
+                logger.error("도구 호출 실패: '%s' — %s", tool_name, e)
+                raise
+
+        # LangChain/DeepAgents 도구 속성 보존
+        for attr in ("name", "description", "args_schema", "return_direct"):
+            if hasattr(func, attr):
+                setattr(wrapper, attr, getattr(func, attr))
+
+        return wrapper
+
+    def get_all_tracked(self) -> list[Callable]:
+        """추적 래핑된 모든 도구를 반환합니다."""
+        return [self.wrap_with_tracking(e.func) for e in self._tools.values()]
+
+    def get_by_tag_tracked(self, tag: str) -> list[Callable]:
+        """추적 래핑된 특정 태그 도구를 반환합니다."""
+        return [
+            self.wrap_with_tracking(e.func)
+            for e in self._tools.values()
+            if tag in e.tags
+        ]
+
+    def get_call_log(self) -> list[ToolCallRecord]:
+        """도구 호출 기록을 반환합니다."""
+        return list(self._call_log)
+
+    def get_usage_stats(self) -> dict[str, Any]:
+        """도구 사용 통계를 반환합니다."""
+        calls = Counter(r.tool_name for r in self._call_log)
+        errors = Counter(r.tool_name for r in self._call_log if not r.success)
+        avg_duration: dict[str, float] = {}
+        for name in calls:
+            durations = [r.duration_ms for r in self._call_log if r.tool_name == name]
+            avg_duration[name] = round(sum(durations) / len(durations), 2)
+
+        return {
+            "total_calls": len(self._call_log),
+            "calls_by_tool": dict(calls),
+            "errors_by_tool": dict(errors),
+            "avg_duration_ms": avg_duration,
+        }
+
+    def clear_call_log(self) -> None:
+        """호출 기록 초기화."""
+        self._call_log.clear()
+
     def clear(self) -> None:
-        """모든 도구 제거 (테스트용)."""
+        """모든 도구 및 호출 기록 제거 (테스트용)."""
         self._tools.clear()
+        self._call_log.clear()
 
 
 # 글로벌 싱글턴

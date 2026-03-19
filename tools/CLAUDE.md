@@ -55,6 +55,32 @@ def my_retriever(query: str) -> str:
 | `reasoning` | 추론/사고 |
 | `example` | 템플릿/예시 (build_agent에서 자동 제외) |
 
+## 도구 사용 추적
+
+`build_agent(track_tool_usage=True)`로 활성화하면, 도구 호출이 자동으로 기록된다.
+
+```python
+# 추적 활성화된 에이전트 생성
+agent = build_agent(track_tool_usage=True)
+
+# ... 에이전트 실행 ...
+
+# 사용 통계 조회
+stats = tool_registry.get_usage_stats()
+# → {"total_calls": 5, "calls_by_tool": {"web_search": 3, "think_tool": 2}, ...}
+
+# 개별 호출 기록
+for record in tool_registry.get_call_log():
+    print(f"{record.tool_name}: {record.duration_ms}ms, success={record.success}")
+
+# 레지스트리에서 직접 추적 도구 가져오기 (build_agent 없이)
+tracked_tools = tool_registry.get_all_tracked()
+tracked_search = tool_registry.get_by_tag_tracked("search")
+
+# 호출 기록 초기화
+tool_registry.clear_call_log()
+```
+
 ## 수정 시 주의사항
 
 - `_template.py`의 `example_tool`은 `build_agent()`에서 `__name__` 체크로 자동 제외된다. 함수명을 바꾸면 제외 로직도 확인할 것.

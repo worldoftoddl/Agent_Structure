@@ -13,6 +13,8 @@ tools/, subagents/, skills/ 폴더에서는 각자 독립적으로 개발하고
 """
 from __future__ import annotations
 
+import copy
+import logging
 from typing import Any, Sequence
 
 from deepagents import create_deep_agent
@@ -22,6 +24,8 @@ from ..config import settings
 from .model_provider import ModelProvider, get_provider
 from ..tools import tool_registry
 from ..subagents import subagent_registry
+
+logger = logging.getLogger(__name__)
 
 
 def build_agent(
@@ -40,6 +44,9 @@ def build_agent(
     subagent_names: list[str] | None = None,
     include_all_subagents: bool = False,
 
+    # 서브에이전트 도구 상속
+    inherit_tools: bool = True,
+
     # 프롬프트
     system_prompt: str | None = None,
 
@@ -50,6 +57,9 @@ def build_agent(
     backend: Any = None,
     checkpointer: Any = None,
     interrupt_on: dict | None = None,
+
+    # 모니터링
+    track_tool_usage: bool = False,
 
     # 기타
     **deep_agent_kwargs: Any,
@@ -72,6 +82,9 @@ def build_agent(
         subagent_names: 사용할 서브에이전트 이름 목록
         include_all_subagents: True면 등록된 모든 서브에이전트 포함
 
+        inherit_tools: True면 메인 에이전트 도구를 서브에이전트에 자동 상속.
+            서브에이전트 config에 "inherit_tools": False가 있으면 해당 에이전트는 제외.
+
         system_prompt: 에이전트 시스템 프롬프트
         enable_memory: 메모리 활성화 여부
         memory_files: AGENTS.md 등 메모리 파일 경로
@@ -79,6 +92,8 @@ def build_agent(
         backend: 파일시스템 백엔드
         checkpointer: LangGraph 체크포인터 (HITL에 필수)
         interrupt_on: Human-in-the-loop 설정
+        track_tool_usage: True면 도구 호출을 추적하여 tool_registry에 기록.
+            tool_registry.get_usage_stats()로 통계 조회 가능.
         **deep_agent_kwargs: create_deep_agent에 전달할 추가 인자
 
     Returns:
@@ -107,8 +122,12 @@ def build_agent(
         prov_name = provider_name or settings.default_provider
         m_name = model_name or settings.default_model
         provider = get_provider(prov_name, model_name=m_name)
+    else:
+        prov_name = type(provider).__name__
+        m_name = getattr(provider, "model_name", "?")
 
     llm = provider.get_llm()
+    logger.info("모델 준비 완료: provider=%s, model=%s", prov_name, m_name)
 
     # ── 2. 도구 수집 ──
     collected_tools: list = []
@@ -135,18 +154,32 @@ def build_agent(
     if tools:
         collected_tools.extend(tools)
 
+    tool_names = [getattr(t, "__name__", getattr(t, "name", "?")) for t in collected_tools]
+    logger.info("도구 수집: %d개 %s", len(collected_tools), tool_names)
+
     # ── 3. 서브에이전트 수집 ──
-    subagents = []
+    subagents: list[dict[str, Any]] = []
     if include_all_subagents:
         subagents = subagent_registry.get_all()
     elif subagent_names:
         subagents = subagent_registry.get_by_names(subagent_names)
 
-    # ── 4. 체크포인터 (HITL / 메모리에 필요) ──
+    logger.info("서브에이전트 수집: %d개 %s", len(subagents), [s.get("name") for s in subagents])
+
+    # ── 3.5. 서브에이전트 도구 상속 ──
+    if subagents and inherit_tools and collected_tools:
+        subagents = _inherit_tools_to_subagents(subagents, collected_tools)
+
+    # ── 4. 도구 사용 추적 ──
+    if track_tool_usage:
+        collected_tools = [tool_registry.wrap_with_tracking(t) for t in collected_tools]
+        logger.info("도구 사용 추적 활성화")
+
+    # ── 5. 체크포인터 (HITL / 메모리에 필요) ──
     if checkpointer is None and (interrupt_on or enable_memory):
         checkpointer = MemorySaver()
 
-    # ── 5. 조립 ──
+    # ── 6. 조립 ──
     agent_kwargs: dict[str, Any] = {
         "model": llm,
         "tools": collected_tools,
@@ -169,5 +202,43 @@ def build_agent(
         agent_kwargs["memory"] = memory_files
 
     agent = create_deep_agent(**agent_kwargs)
+    logger.info("에이전트 빌드 완료 (도구=%d, 서브에이전트=%d)", len(collected_tools), len(subagents))
 
     return agent
+
+
+def _inherit_tools_to_subagents(
+    subagents: list[dict[str, Any]],
+    tools: list,
+) -> list[dict[str, Any]]:
+    """서브에이전트에 메인 에이전트의 도구를 상속합니다.
+
+    - 서브에이전트의 tools가 비어있을 때만 상속
+    - config에 "inherit_tools": False가 있으면 건너뜀
+    - 원본 config를 변경하지 않도록 복사본 사용
+    """
+    result = []
+    for cfg in subagents:
+        if cfg.get("inherit_tools") is False:
+            result.append(cfg)
+            logger.debug("서브에이전트 '%s': 도구 상속 제외 (inherit_tools=False)", cfg.get("name"))
+            continue
+
+        if not cfg.get("tools"):
+            cfg = copy.copy(cfg)
+            cfg["tools"] = list(tools)
+            logger.info(
+                "서브에이전트 '%s': 메인 도구 %d개 상속",
+                cfg.get("name"),
+                len(tools),
+            )
+        else:
+            logger.debug(
+                "서브에이전트 '%s': 자체 도구 %d개 보유, 상속 건너뜀",
+                cfg.get("name"),
+                len(cfg["tools"]),
+            )
+
+        result.append(cfg)
+
+    return result
