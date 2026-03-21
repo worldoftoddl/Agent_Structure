@@ -36,7 +36,7 @@ def web_search(
 
     api_key = settings.tavily_api_key
     if not api_key:
-        return {"error": "TAVILY_API_KEY가 설정되지 않았습니다."}
+        raise RuntimeError("TAVILY_API_KEY가 설정되지 않았습니다.")
 
     client = TavilyClient(api_key=api_key)
     return client.search(

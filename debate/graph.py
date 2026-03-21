@@ -10,11 +10,12 @@ LangGraph StateGraph를 구성하여 CEDA 토론 흐름을 구현한다.
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import Any, Callable
 
 from langchain_core.language_models import BaseChatModel
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, START, StateGraph
+from langgraph.graph.state import CompiledStateGraph
 
 from ..config import settings
 from ..core.model_provider import get_provider
@@ -54,10 +55,10 @@ def build_debate_graph(
     judge_provider_name: str | None = None,
     judge_model_name: str | None = None,
     # 도구 (선택)
-    tools: list | None = None,
+    tools: list[Callable] | None = None,
     # 체크포인터
     checkpointer: Any | None = None,
-) -> StateGraph:
+) -> CompiledStateGraph:
     """CEDA 토론 StateGraph를 조립하여 컴파일된 그래프를 반환한다.
 
     Args:

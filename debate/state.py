@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import operator
 from typing import Annotated, Literal
-from typing_extensions import TypedDict
+from typing_extensions import NotRequired, TypedDict
 
 
 class SpeechRecord(TypedDict):
@@ -40,12 +40,12 @@ class DebateState(TypedDict):
     transcript: Annotated[list[SpeechRecord], operator.add]
     current_round_index: int
 
-    # 비공개 상태 (측별 격리)
-    aff_private_notes: str
-    neg_private_notes: str
+    # 비공개 상태 (측별 격리) — 초기 상태에서 없을 수 있음
+    aff_private_notes: NotRequired[str]
+    neg_private_notes: NotRequired[str]
 
-    # 최종 결과
-    verdict: str
+    # 최종 결과 — 심판 판정 전까지 없음
+    verdict: NotRequired[str]
 
 
 # ── CEDA 표준 라운드 시퀀스 (CX 질문/답변 분리) ──

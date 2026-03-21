@@ -13,7 +13,7 @@ CEDA 토론 고수준 API.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Generator
+from typing import Any, Callable, Generator
 
 from .graph import build_debate_graph
 from .prompts import format_transcript_for_llm
@@ -39,9 +39,6 @@ def _build_initial_state(proposition: str) -> DebateState:
         round_sequence=list(CEDA_ROUNDS),
         transcript=[],
         current_round_index=0,
-        aff_private_notes="",
-        neg_private_notes="",
-        verdict="",
     )
 
 
@@ -56,7 +53,7 @@ def create_debate(
     neg_model_name: str | None = None,
     judge_provider_name: str | None = None,
     judge_model_name: str | None = None,
-    tools: list | None = None,
+    tools: list[Callable] | None = None,
     checkpointer: Any | None = None,
 ) -> tuple[Any, DebateState]:
     """토론 그래프와 초기 상태를 생성한다.
@@ -91,7 +88,7 @@ def run_debate(
     neg_model_name: str | None = None,
     judge_provider_name: str | None = None,
     judge_model_name: str | None = None,
-    tools: list | None = None,
+    tools: list[Callable] | None = None,
     thread_id: str = "debate-default",
 ) -> DebateResult:
     """CEDA 토론을 동기 실행하고 결과를 반환한다."""
@@ -131,7 +128,7 @@ async def arun_debate(
     neg_model_name: str | None = None,
     judge_provider_name: str | None = None,
     judge_model_name: str | None = None,
-    tools: list | None = None,
+    tools: list[Callable] | None = None,
     thread_id: str = "debate-default",
 ) -> DebateResult:
     """CEDA 토론을 비동기 실행하고 결과를 반환한다."""
@@ -171,7 +168,7 @@ def stream_debate(
     neg_model_name: str | None = None,
     judge_provider_name: str | None = None,
     judge_model_name: str | None = None,
-    tools: list | None = None,
+    tools: list[Callable] | None = None,
     thread_id: str = "debate-default",
 ) -> Generator[SpeechRecord, None, None]:
     """CEDA 토론을 라운드별로 스트리밍한다.

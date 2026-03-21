@@ -25,10 +25,13 @@ create_deep_agent(tools=...)에 넘길 수 있습니다.
 """
 from __future__ import annotations
 
+import asyncio
 import functools
+import inspect
 import logging
+import threading
 import time
-from collections import Counter
+from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Callable
@@ -61,6 +64,7 @@ class ToolRegistry:
     def __init__(self) -> None:
         self._tools: dict[str, ToolEntry] = {}
         self._call_log: list[ToolCallRecord] = []
+        self._log_lock = threading.Lock()
 
     def register(
         self,
@@ -119,42 +123,63 @@ class ToolRegistry:
 
     # ── 도구 사용 추적 ──
 
+    def _record_call(self, tool_name: str, duration: float, success: bool, error: str | None = None) -> None:
+        """호출 기록을 스레드 안전하게 추가한다."""
+        record = ToolCallRecord(
+            tool_name=tool_name,
+            timestamp=datetime.now(),
+            duration_ms=round(duration, 2),
+            success=success,
+            error=error,
+        )
+        with self._log_lock:
+            self._call_log.append(record)
+
     def wrap_with_tracking(self, func: Callable) -> Callable:
-        """도구 함수를 래핑하여 호출을 추적합니다."""
+        """도구 함수를 래핑하여 호출을 추적합니다. sync/async 모두 지원."""
         tool_name = getattr(func, "__name__", getattr(func, "name", "unknown"))
 
-        @functools.wraps(func)
-        def wrapper(*args: Any, **kwargs: Any) -> Any:
-            start = time.perf_counter()
-            try:
-                result = func(*args, **kwargs)
-                duration = (time.perf_counter() - start) * 1000
-                self._call_log.append(ToolCallRecord(
-                    tool_name=tool_name,
-                    timestamp=datetime.now(),
-                    duration_ms=round(duration, 2),
-                    success=True,
-                ))
-                logger.info("도구 호출 완료: '%s' (%.1fms)", tool_name, duration)
-                return result
-            except Exception as e:
-                duration = (time.perf_counter() - start) * 1000
-                self._call_log.append(ToolCallRecord(
-                    tool_name=tool_name,
-                    timestamp=datetime.now(),
-                    duration_ms=round(duration, 2),
-                    success=False,
-                    error=str(e),
-                ))
-                logger.error("도구 호출 실패: '%s' — %s", tool_name, e)
-                raise
+        if inspect.iscoroutinefunction(func):
+            @functools.wraps(func)
+            async def async_wrapper(*args: Any, **kwargs: Any) -> Any:
+                start = time.perf_counter()
+                try:
+                    result = await func(*args, **kwargs)
+                    duration = (time.perf_counter() - start) * 1000
+                    self._record_call(tool_name, duration, success=True)
+                    logger.info("도구 호출 완료: '%s' (%.1fms)", tool_name, duration)
+                    return result
+                except Exception as e:
+                    duration = (time.perf_counter() - start) * 1000
+                    self._record_call(tool_name, duration, success=False, error=str(e))
+                    logger.error("도구 호출 실패: '%s' — %s", tool_name, e)
+                    raise
+
+            wrapped: Callable = async_wrapper
+        else:
+            @functools.wraps(func)
+            def sync_wrapper(*args: Any, **kwargs: Any) -> Any:
+                start = time.perf_counter()
+                try:
+                    result = func(*args, **kwargs)
+                    duration = (time.perf_counter() - start) * 1000
+                    self._record_call(tool_name, duration, success=True)
+                    logger.info("도구 호출 완료: '%s' (%.1fms)", tool_name, duration)
+                    return result
+                except Exception as e:
+                    duration = (time.perf_counter() - start) * 1000
+                    self._record_call(tool_name, duration, success=False, error=str(e))
+                    logger.error("도구 호출 실패: '%s' — %s", tool_name, e)
+                    raise
+
+            wrapped = sync_wrapper
 
         # LangChain/DeepAgents 도구 속성 보존
         for attr in ("name", "description", "args_schema", "return_direct"):
             if hasattr(func, attr):
-                setattr(wrapper, attr, getattr(func, attr))
+                setattr(wrapped, attr, getattr(func, attr))
 
-        return wrapper
+        return wrapped
 
     def get_all_tracked(self) -> list[Callable]:
         """추적 래핑된 모든 도구를 반환합니다."""
@@ -170,19 +195,30 @@ class ToolRegistry:
 
     def get_call_log(self) -> list[ToolCallRecord]:
         """도구 호출 기록을 반환합니다."""
-        return list(self._call_log)
+        with self._log_lock:
+            return list(self._call_log)
 
     def get_usage_stats(self) -> dict[str, Any]:
-        """도구 사용 통계를 반환합니다."""
-        calls = Counter(r.tool_name for r in self._call_log)
-        errors = Counter(r.tool_name for r in self._call_log if not r.success)
-        avg_duration: dict[str, float] = {}
-        for name in calls:
-            durations = [r.duration_ms for r in self._call_log if r.tool_name == name]
-            avg_duration[name] = round(sum(durations) / len(durations), 2)
+        """도구 사용 통계를 반환합니다. O(m) 단일 패스."""
+        with self._log_lock:
+            snapshot = list(self._call_log)
+
+        calls: Counter[str] = Counter()
+        errors: Counter[str] = Counter()
+        duration_buckets: dict[str, list[float]] = defaultdict(list)
+
+        for r in snapshot:
+            calls[r.tool_name] += 1
+            if not r.success:
+                errors[r.tool_name] += 1
+            duration_buckets[r.tool_name].append(r.duration_ms)
+
+        avg_duration = {
+            name: round(sum(d) / len(d), 2) for name, d in duration_buckets.items()
+        }
 
         return {
-            "total_calls": len(self._call_log),
+            "total_calls": len(snapshot),
             "calls_by_tool": dict(calls),
             "errors_by_tool": dict(errors),
             "avg_duration_ms": avg_duration,
@@ -190,12 +226,14 @@ class ToolRegistry:
 
     def clear_call_log(self) -> None:
         """호출 기록 초기화."""
-        self._call_log.clear()
+        with self._log_lock:
+            self._call_log.clear()
 
     def clear(self) -> None:
         """모든 도구 및 호출 기록 제거 (테스트용)."""
         self._tools.clear()
-        self._call_log.clear()
+        with self._log_lock:
+            self._call_log.clear()
 
 
 # 글로벌 싱글턴

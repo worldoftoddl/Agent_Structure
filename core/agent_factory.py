@@ -13,7 +13,6 @@ tools/, subagents/, skills/ 폴더에서는 각자 독립적으로 개발하고
 """
 from __future__ import annotations
 
-import copy
 import logging
 from typing import Any, Sequence
 
@@ -36,7 +35,7 @@ def build_agent(
     model_name: str | None = None,
 
     # 도구 설정
-    tools: list | None = None,
+    tools: list[Any] | None = None,
     tool_tags: list[str] | None = None,
     exclude_tools: list[str] | None = None,
 
@@ -130,7 +129,7 @@ def build_agent(
     logger.info("모델 준비 완료: provider=%s, model=%s", prov_name, m_name)
 
     # ── 2. 도구 수집 ──
-    collected_tools: list = []
+    collected_tools: list[Any] = []
     exclude_set = set(exclude_tools or [])
 
     if tool_tags:
@@ -138,10 +137,10 @@ def build_agent(
         for tag in tool_tags:
             collected_tools.extend(tool_registry.get_by_tag(tag))
     else:
-        # 전체 도구 (_template 제외)
+        # 전체 도구 ("example" 태그 제외)
         collected_tools = [
             t for t in tool_registry.get_all()
-            if getattr(t, "__name__", "") != "example_tool"
+            if not _is_example_tool(t)
         ]
 
     # 이름으로 필터링
@@ -207,6 +206,13 @@ def build_agent(
     return agent
 
 
+def _is_example_tool(t: Any) -> bool:
+    """'example' 태그가 달린 도구인지 확인한다."""
+    name = getattr(t, "__name__", getattr(t, "name", ""))
+    entry = tool_registry._tools.get(name)
+    return entry is not None and "example" in entry.tags
+
+
 def _inherit_tools_to_subagents(
     subagents: list[dict[str, Any]],
     tools: list,
@@ -225,8 +231,7 @@ def _inherit_tools_to_subagents(
             continue
 
         if not cfg.get("tools"):
-            cfg = copy.copy(cfg)
-            cfg["tools"] = list(tools)
+            cfg = {**cfg, "tools": list(tools)}
             logger.info(
                 "서브에이전트 '%s': 메인 도구 %d개 상속",
                 cfg.get("name"),

@@ -53,11 +53,12 @@ def _parse_speech_and_notes(raw: str) -> tuple[str, str]:
 
 def _invoke_with_tools(
     llm: BaseChatModel,
-    messages: list,
-    tools: list,
+    messages: list[Any],
+    tools: list[Callable],
     max_iterations: int = 5,
 ) -> str:
     """도구가 바인딩된 LLM을 호출하고, 도구 호출 루프를 실행한다."""
+    messages = list(messages)  # 방어적 복사 — 호출자의 리스트를 변형하지 않음
     llm_with_tools = llm.bind_tools(tools)
 
     # 도구를 이름으로 매핑
@@ -80,7 +81,12 @@ def _invoke_with_tools(
             else:
                 try:
                     result = tool_fn.invoke(tc["args"])
+                except (KeyboardInterrupt, SystemExit):
+                    raise
                 except Exception as e:
+                    logger.warning(
+                        "도구 '%s' 호출 실패 (%s): %s", tc["name"], type(e).__name__, e
+                    )
                     result = f"Error: {e}"
 
             messages.append(
@@ -97,7 +103,7 @@ def _invoke_with_tools(
 def create_debate_node(
     aff_llm: BaseChatModel,
     neg_llm: BaseChatModel,
-    tools: list | None = None,
+    tools: list[Callable] | None = None,
 ) -> Callable[[DebateState], dict]:
     """토론 발언 노드 함수를 생성한다.
 

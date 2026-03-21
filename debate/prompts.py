@@ -6,7 +6,7 @@ CEDA 토론 프롬프트 템플릿.
 """
 from __future__ import annotations
 
-from .state import RoundConfig
+from .state import RoundConfig, SpeechRecord
 
 
 # ── 역할별 시스템 프롬프트 ──
@@ -143,7 +143,12 @@ def get_round_instructions(round_config: RoundConfig) -> str:
     speech_type = round_config["speech_type"]
     round_id = round_config["round_id"]
 
-    template = _ROUND_INSTRUCTIONS.get(speech_type, "")
+    template = _ROUND_INSTRUCTIONS.get(speech_type)
+    if template is None:
+        raise ValueError(
+            f"알 수 없는 speech_type: '{speech_type}'. "
+            f"허용 값: {list(_ROUND_INSTRUCTIONS.keys())}"
+        )
 
     final_note = ""
     if round_id in ("2NR", "2AR"):
@@ -156,7 +161,7 @@ def get_round_instructions(round_config: RoundConfig) -> str:
     return template.format(round_id=round_id, final_note=final_note)
 
 
-def format_transcript_for_llm(transcript: list[dict]) -> str:
+def format_transcript_for_llm(transcript: list[SpeechRecord]) -> str:
     """토론 기록을 LLM이 읽을 수 있는 텍스트로 변환한다."""
     if not transcript:
         return "(아직 발언이 없습니다.)"
