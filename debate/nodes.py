@@ -33,6 +33,7 @@ from .state import DebateState, SpeechRecord
 logger = logging.getLogger(__name__)
 
 DEFAULT_MAX_SPEECH_CHARS: int = 1200
+DEFAULT_CONTEXT_WINDOW: int = 3
 
 # ── 비공개 메모 파싱 ──
 
@@ -127,6 +128,7 @@ def create_debate_node(
     neg_llm: BaseChatModel,
     tools: list[Callable] | None = None,
     max_speech_chars: int = DEFAULT_MAX_SPEECH_CHARS,
+    context_window: int = DEFAULT_CONTEXT_WINDOW,
 ) -> Callable[[DebateState], dict]:
     """토론 발언 노드 함수를 생성한다.
 
@@ -154,8 +156,11 @@ def create_debate_node(
         # 메시지 구성
         messages: list[BaseMessage] = [SystemMessage(content=system_prompt)]
 
-        # 공개 transcript
-        transcript_text = format_transcript_for_llm(state.get("transcript", []))
+        # 공개 transcript (윈도우 적용)
+        transcript_text = format_transcript_for_llm(
+            state.get("transcript", []),
+            context_window=context_window,
+        )
         messages.append(
             HumanMessage(content=f"## 지금까지의 토론 기록\n\n{transcript_text}")
         )

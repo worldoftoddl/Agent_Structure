@@ -171,8 +171,18 @@ def get_round_instructions(round_config: RoundConfig, max_speech_chars: int = 0)
     return result
 
 
-def format_transcript_for_llm(transcript: list[SpeechRecord]) -> str:
-    """토론 기록을 LLM이 읽을 수 있는 텍스트로 변환한다."""
+def format_transcript_for_llm(
+    transcript: list[SpeechRecord],
+    context_window: int = 0,
+    summary_chars: int = 200,
+) -> str:
+    """토론 기록을 LLM이 읽을 수 있는 텍스트로 변환한다.
+
+    Args:
+        transcript: 발언 기록 리스트
+        context_window: 최근 N개 라운드만 전문 유지 (0이면 전체 전문)
+        summary_chars: 윈도우 밖 발언의 요약 길이 (글자 수)
+    """
     if not transcript:
         return "(아직 발언이 없습니다.)"
 
@@ -190,12 +200,25 @@ def format_transcript_for_llm(transcript: list[SpeechRecord]) -> str:
         "verdict": "판정",
     }
 
-    parts = []
-    for speech in transcript:
+    def _format_speech(speech: SpeechRecord, truncate: bool = False) -> str:
         speaker = speaker_labels.get(speech["speaker"], speech["speaker"])
         stype = type_labels.get(speech["speech_type"], speech["speech_type"])
-        parts.append(
-            f"### [{speech['round_id']}] {speaker} — {stype}\n\n{speech['content']}"
-        )
+        content = speech["content"]
+        if truncate and len(content) > summary_chars:
+            content = content[:summary_chars].rstrip() + " [... 이하 생략]"
+        return f"### [{speech['round_id']}] {speaker} — {stype}\n\n{content}"
 
-    return "\n\n---\n\n".join(parts)
+    # context_window == 0: 전체 전문 (기존 동작)
+    if context_window <= 0 or len(transcript) <= context_window:
+        return "\n\n---\n\n".join(_format_speech(s) for s in transcript)
+
+    # 윈도우 분할
+    split = len(transcript) - context_window
+    old_parts = [_format_speech(s, truncate=True) for s in transcript[:split]]
+    recent_parts = [_format_speech(s) for s in transcript[split:]]
+
+    return (
+        "\n\n---\n\n".join(old_parts)
+        + "\n\n--- 이상 요약 / 이하 최근 발언 전문 ---\n\n"
+        + "\n\n---\n\n".join(recent_parts)
+    )

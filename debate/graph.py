@@ -19,7 +19,7 @@ from langgraph.graph.state import CompiledStateGraph
 
 from ..config import settings
 from ..core.model_provider import get_provider
-from .nodes import DEFAULT_MAX_SPEECH_CHARS, create_debate_node, create_judge_node, route_next
+from .nodes import DEFAULT_CONTEXT_WINDOW, DEFAULT_MAX_SPEECH_CHARS, create_debate_node, create_judge_node, route_next
 from .state import DebateState
 
 logger = logging.getLogger(__name__)
@@ -58,6 +58,8 @@ def build_debate_graph(
     tools: list[Callable] | None = None,
     # 발언 길이 제한 (0이면 무제한)
     max_speech_chars: int = DEFAULT_MAX_SPEECH_CHARS,
+    # 컨텍스트 윈도우 (최근 N개 라운드 전문, 0이면 전체 전문)
+    context_window: int = DEFAULT_CONTEXT_WINDOW,
     # 체크포인터
     checkpointer: Any | None = None,
 ) -> CompiledStateGraph:
@@ -93,7 +95,11 @@ def build_debate_graph(
     )
 
     # ── 2. 노드 함수 생성 (클로저) ──
-    debate_node = create_debate_node(aff_llm, neg_llm, tools, max_speech_chars=max_speech_chars)
+    debate_node = create_debate_node(
+        aff_llm, neg_llm, tools,
+        max_speech_chars=max_speech_chars,
+        context_window=context_window,
+    )
     judge_node = create_judge_node(judge_llm)
 
     # ── 3. StateGraph 조립 ──

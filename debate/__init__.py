@@ -1,4 +1,4 @@
-from .nodes import DEFAULT_MAX_SPEECH_CHARS
+from .nodes import DEFAULT_CONTEXT_WINDOW, DEFAULT_MAX_SPEECH_CHARS
 from .runner import (
     DebateResult,
     arun_debate,
