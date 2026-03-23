@@ -72,6 +72,37 @@ def _truncate_speech(speech: str, max_chars: int) -> str:
     return truncated.rstrip() + "..."
 
 
+def _condense_speech(
+    llm: BaseChatModel,
+    speech: str,
+    max_chars: int,
+) -> str:
+    """LLM을 사용하여 발언을 max_chars 이내로 요약 압축한다.
+
+    요약 결과도 초과하면 _truncate_speech로 폴백한다.
+    """
+    if len(speech) <= max_chars:
+        return speech
+
+    # 목표 글자 수를 80%로 설정하여 초과 방지 여유 확보
+    target = int(max_chars * 0.8)
+    prompt = (
+        f"다음 토론 발언을 반드시 {target}자 이내로 압축하세요.\n"
+        f"현재 {len(speech)}자이며, {target}자 이하로 줄여야 합니다.\n"
+        "규칙:\n"
+        "- 핵심 논점과 근거만 남기고 수식어·반복·예시를 과감히 삭제\n"
+        "- 요약문만 출력. 서두·설명·메타 코멘트 금지\n\n"
+        f"--- 원문 ---\n{speech}"
+    )
+    response = llm.invoke([HumanMessage(content=prompt)])
+    condensed = (response.content or "").strip()
+
+    if len(condensed) > max_chars:
+        logger.warning("LLM 요약도 %d자 초과 → 강제 절단", len(condensed))
+        return _truncate_speech(condensed, max_chars)
+    return condensed
+
+
 # ── 도구 호출 루프 ──
 
 def _invoke_with_tools(
@@ -187,15 +218,14 @@ def create_debate_node(
         # 공개 발언과 비공개 메모 분리
         speech_content, updated_notes = _parse_speech_and_notes(raw_response)
 
-        # 공개 발언 길이 제한 적용
-        if max_speech_chars > 0:
+        # 공개 발언 길이 제한 적용 (LLM 요약 → 폴백 절단)
+        if max_speech_chars > 0 and len(speech_content) > max_speech_chars:
             original_len = len(speech_content)
-            speech_content = _truncate_speech(speech_content, max_speech_chars)
-            if len(speech_content) < original_len:
-                logger.warning(
-                    "발언 길이 초과 → 절단: %s (%d → %d자)",
-                    round_id, original_len, len(speech_content),
-                )
+            speech_content = _condense_speech(llm, speech_content, max_speech_chars)
+            logger.info(
+                "발언 요약 압축: %s (%d → %d자)",
+                round_id, original_len, len(speech_content),
+            )
 
         logger.info("토론 라운드 완료: %s (%d자)", round_id, len(speech_content))
 
