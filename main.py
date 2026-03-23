@@ -13,12 +13,15 @@ NOTE: 단일 워커(--workers 1)로 실행해야 합니다.
 """
 from __future__ import annotations
 
+import os
 import re
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Any
 
-from fastapi import FastAPI, Header, HTTPException
+from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.security import APIKeyHeader
 from pydantic import BaseModel, Field, field_validator
 
 from .config import settings
@@ -34,7 +37,7 @@ _THREAD_ID_PATTERN = re.compile(r"^[a-zA-Z0-9_-]{1,128}$")
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """서버 시작 시 기본 에이전트를 미리 빌드합니다."""
     missing = settings.validate()
     if missing:
@@ -57,7 +60,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:8888"],
     allow_methods=["GET", "POST"],
-    allow_headers=["*"],
+    allow_headers=["Content-Type", "X-API-Key"],
 )
 
 
@@ -78,25 +81,29 @@ class ChatResponse(BaseModel):
     thread_id: str
 
 
+_api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
+
+
 async def _verify_api_key(
-    x_api_key: str | None = Header(None, alias="X-API-Key"),
+    x_api_key: str | None = Depends(_api_key_header),
 ) -> None:
     """API 키 헤더 검증. 환경변수 DEEPAGENT_API_KEY가 설정된 경우에만 활성화."""
-    import os
     expected = os.getenv("DEEPAGENT_API_KEY")
     if expected and x_api_key != expected:
         raise HTTPException(status_code=401, detail="유효하지 않은 API 키")
 
 
 @app.post("/chat", response_model=ChatResponse)
-async def chat(req: ChatRequest) -> ChatResponse:
+async def chat(
+    req: ChatRequest,
+    _: None = Depends(_verify_api_key),
+) -> ChatResponse:
     """에이전트에 메시지를 보내고 응답을 받습니다."""
-    await _verify_api_key()
     agent = _agent_cache["default"]
     response_text = await arun(agent, req.message, thread_id=req.thread_id)
     return ChatResponse(response=response_text, thread_id=req.thread_id)
 
 
 @app.get("/health")
-async def health():
+async def health() -> dict[str, str]:
     return {"status": "ok"}

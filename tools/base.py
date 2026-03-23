@@ -109,6 +109,11 @@ class ToolRegistry:
         """특정 태그가 달린 도구만 반환합니다."""
         return [e.func for e in self._tools.values() if tag in e.tags]
 
+    def has_tag(self, tool_name: str, tag: str) -> bool:
+        """도구가 특정 태그를 가지고 있는지 확인합니다."""
+        entry = self._tools.get(tool_name)
+        return entry is not None and tag in entry.tags
+
     def list_names(self) -> list[str]:
         """등록된 도구 이름 목록."""
         return list(self._tools.keys())

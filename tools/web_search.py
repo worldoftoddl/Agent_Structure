@@ -7,7 +7,7 @@ Tavily는 LLM 에이전트에 최적화된 검색 API로,
 """
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 
 from .base import register_tool
 from ..config import settings
@@ -19,7 +19,7 @@ def web_search(
     max_results: int = 5,
     topic: Literal["general", "news", "finance"] = "general",
     include_raw_content: bool = False,
-) -> dict:
+) -> dict[str, Any]:
     """
     Tavily API를 사용한 웹 검색.
 

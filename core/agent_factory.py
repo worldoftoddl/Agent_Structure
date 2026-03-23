@@ -207,10 +207,13 @@ def build_agent(
 
 
 def _is_example_tool(t: Any) -> bool:
-    """'example' 태그가 달린 도구인지 확인한다."""
+    """'example' 태그가 달린 도구인지 확인한다.
+
+    _template.py의 example_tool 외에도, 향후 'example' 태그로
+    등록되는 모든 도구를 자동 제외하기 위한 가드.
+    """
     name = getattr(t, "__name__", getattr(t, "name", ""))
-    entry = tool_registry._tools.get(name)
-    return entry is not None and "example" in entry.tags
+    return tool_registry.has_tag(name, "example")
 
 
 def _inherit_tools_to_subagents(

@@ -15,7 +15,10 @@ DeepAgents의 subagent는 dict 형태로 정의됩니다:
 """
 from __future__ import annotations
 
+import logging
 from typing import Any, Callable
+
+logger = logging.getLogger(__name__)
 
 
 class SubagentRegistry:
@@ -35,6 +38,8 @@ class SubagentRegistry:
         name = config.get("name")
         if not name:
             raise ValueError("서브에이전트 config에 'name' 키가 필요합니다.")
+        if name in self._agents:
+            logger.warning("서브에이전트 '%s' 재등록 — 기존 설정 덮어씀", name)
         self._agents[name] = config
 
     def get(self, name: str) -> dict[str, Any]:

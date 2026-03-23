@@ -15,6 +15,7 @@ from typing import Any, Callable
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import (
     AIMessage,
+    BaseMessage,
     HumanMessage,
     SystemMessage,
     ToolMessage,
@@ -93,8 +94,8 @@ def _invoke_with_tools(
                 ToolMessage(content=str(result), tool_call_id=tc["id"])
             )
 
-    # max_iterations 도달 시 마지막 응답 반환
-    final = llm_with_tools.invoke(messages)
+    # max_iterations 도달 시 도구 미바인딩 LLM으로 최종 텍스트 응답 유도
+    final = llm.invoke(messages)
     return final.content or ""
 
 
@@ -129,7 +130,7 @@ def create_debate_node(
             my_notes = state.get("neg_private_notes", "")
 
         # 메시지 구성
-        messages: list = [SystemMessage(content=system_prompt)]
+        messages: list[BaseMessage] = [SystemMessage(content=system_prompt)]
 
         # 공개 transcript
         transcript_text = format_transcript_for_llm(state.get("transcript", []))
