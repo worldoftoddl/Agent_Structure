@@ -138,7 +138,7 @@ _ROUND_INSTRUCTIONS: dict[str, str] = {
 }
 
 
-def get_round_instructions(round_config: RoundConfig) -> str:
+def get_round_instructions(round_config: RoundConfig, max_speech_chars: int = 0) -> str:
     """라운드 설정에 맞는 지시사항을 반환한다."""
     speech_type = round_config["speech_type"]
     round_id = round_config["round_id"]
@@ -158,7 +158,17 @@ def get_round_instructions(round_config: RoundConfig) -> str:
             "왜 자신의 측이 이 토론에서 승리해야 하는지 결정적으로 정리하세요."
         )
 
-    return template.format(round_id=round_id, final_note=final_note)
+    result = template.format(round_id=round_id, final_note=final_note)
+
+    if max_speech_chars > 0:
+        result += (
+            f"\n\n## 분량 제한\n"
+            f"공개 발언은 **{max_speech_chars}자 이내**로 작성하세요. "
+            f"비공개 메모([PRIVATE_NOTES])는 분량 제한에 포함되지 않습니다. "
+            f"핵심 논점에 집중하여 간결하게 작성하세요."
+        )
+
+    return result
 
 
 def format_transcript_for_llm(transcript: list[SpeechRecord]) -> str:

@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from typing import Any, Callable, Generator
 
 from .graph import build_debate_graph
+from .nodes import DEFAULT_MAX_SPEECH_CHARS
 from .prompts import format_transcript_for_llm
 from .state import CEDA_ROUNDS, DebateState, SpeechRecord
 
@@ -54,6 +55,7 @@ def create_debate(
     judge_provider_name: str | None = None,
     judge_model_name: str | None = None,
     tools: list[Callable] | None = None,
+    max_speech_chars: int = DEFAULT_MAX_SPEECH_CHARS,
     checkpointer: Any | None = None,
 ) -> tuple[Any, DebateState]:
     """토론 그래프와 초기 상태를 생성한다.
@@ -71,6 +73,7 @@ def create_debate(
         judge_provider_name=judge_provider_name,
         judge_model_name=judge_model_name,
         tools=tools,
+        max_speech_chars=max_speech_chars,
         checkpointer=checkpointer,
     )
     initial_state = _build_initial_state(proposition)
@@ -89,6 +92,7 @@ def run_debate(
     judge_provider_name: str | None = None,
     judge_model_name: str | None = None,
     tools: list[Callable] | None = None,
+    max_speech_chars: int = DEFAULT_MAX_SPEECH_CHARS,
     thread_id: str = "debate-default",
 ) -> DebateResult:
     """CEDA 토론을 동기 실행하고 결과를 반환한다."""
@@ -103,6 +107,7 @@ def run_debate(
         judge_provider_name=judge_provider_name,
         judge_model_name=judge_model_name,
         tools=tools,
+        max_speech_chars=max_speech_chars,
     )
 
     result = graph.invoke(
@@ -129,6 +134,7 @@ async def arun_debate(
     judge_provider_name: str | None = None,
     judge_model_name: str | None = None,
     tools: list[Callable] | None = None,
+    max_speech_chars: int = DEFAULT_MAX_SPEECH_CHARS,
     thread_id: str = "debate-default",
 ) -> DebateResult:
     """CEDA 토론을 비동기 실행하고 결과를 반환한다."""
@@ -143,6 +149,7 @@ async def arun_debate(
         judge_provider_name=judge_provider_name,
         judge_model_name=judge_model_name,
         tools=tools,
+        max_speech_chars=max_speech_chars,
     )
 
     result = await graph.ainvoke(
@@ -169,6 +176,7 @@ def stream_debate(
     judge_provider_name: str | None = None,
     judge_model_name: str | None = None,
     tools: list[Callable] | None = None,
+    max_speech_chars: int = DEFAULT_MAX_SPEECH_CHARS,
     thread_id: str = "debate-default",
 ) -> Generator[SpeechRecord, None, None]:
     """CEDA 토론을 라운드별로 스트리밍한다.
@@ -190,6 +198,7 @@ def stream_debate(
         judge_provider_name=judge_provider_name,
         judge_model_name=judge_model_name,
         tools=tools,
+        max_speech_chars=max_speech_chars,
     )
 
     for event in graph.stream(

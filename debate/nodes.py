@@ -32,6 +32,8 @@ from .state import DebateState, SpeechRecord
 
 logger = logging.getLogger(__name__)
 
+DEFAULT_MAX_SPEECH_CHARS: int = 1200
+
 # ── 비공개 메모 파싱 ──
 
 _NOTES_PATTERN = re.compile(
@@ -48,6 +50,25 @@ def _parse_speech_and_notes(raw: str) -> tuple[str, str]:
         speech = _NOTES_PATTERN.sub("", raw).strip()
         return speech, notes
     return raw.strip(), ""
+
+
+def _truncate_speech(speech: str, max_chars: int) -> str:
+    """공개 발언을 max_chars 이내로 문장 단위 절단한다."""
+    if len(speech) <= max_chars:
+        return speech
+
+    truncated = speech[:max_chars]
+    # 마지막 문장 종결자를 역순 탐색
+    last_end = -1
+    for i in range(len(truncated) - 1, -1, -1):
+        if truncated[i] in ".!?\n":
+            last_end = i + 1
+            break
+
+    if last_end > max_chars * 0.5:
+        return truncated[:last_end].rstrip()
+
+    return truncated.rstrip() + "..."
 
 
 # ── 도구 호출 루프 ──
@@ -105,6 +126,7 @@ def create_debate_node(
     aff_llm: BaseChatModel,
     neg_llm: BaseChatModel,
     tools: list[Callable] | None = None,
+    max_speech_chars: int = DEFAULT_MAX_SPEECH_CHARS,
 ) -> Callable[[DebateState], dict]:
     """토론 발언 노드 함수를 생성한다.
 
@@ -147,7 +169,7 @@ def create_debate_node(
             )
 
         # 라운드 지시사항
-        round_instructions = get_round_instructions(round_cfg)
+        round_instructions = get_round_instructions(round_cfg, max_speech_chars=max_speech_chars)
         messages.append(HumanMessage(content=round_instructions))
 
         # LLM 호출
@@ -159,6 +181,16 @@ def create_debate_node(
 
         # 공개 발언과 비공개 메모 분리
         speech_content, updated_notes = _parse_speech_and_notes(raw_response)
+
+        # 공개 발언 길이 제한 적용
+        if max_speech_chars > 0:
+            original_len = len(speech_content)
+            speech_content = _truncate_speech(speech_content, max_speech_chars)
+            if len(speech_content) < original_len:
+                logger.warning(
+                    "발언 길이 초과 → 절단: %s (%d → %d자)",
+                    round_id, original_len, len(speech_content),
+                )
 
         logger.info("토론 라운드 완료: %s (%d자)", round_id, len(speech_content))
 
