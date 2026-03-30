@@ -32,7 +32,7 @@ from .state import DebateState, SpeechRecord
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_MAX_SPEECH_CHARS: int = 1200
+DEFAULT_MAX_SPEECH_CHARS: int = 800
 DEFAULT_CONTEXT_WINDOW: int = 3
 
 # ── 비공개 메모 파싱 ──
