@@ -59,6 +59,4 @@ CEDA_ROUNDS: list[RoundConfig] = [
     {"round_id": "CX_1NC_A", "speaker": "negative",    "speech_type": "cx_answer"},
     {"round_id": "1AR",      "speaker": "affirmative", "speech_type": "rebuttal"},
     {"round_id": "1NR",      "speaker": "negative",    "speech_type": "rebuttal"},
-    {"round_id": "2NR",      "speaker": "negative",    "speech_type": "rebuttal"},
-    {"round_id": "2AR",      "speaker": "affirmative", "speech_type": "rebuttal"},
 ]

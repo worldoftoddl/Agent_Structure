@@ -104,10 +104,19 @@ _ROUND_INSTRUCTIONS: dict[str, str] = {
     "constructive": """## 현재 라운드: {round_id} (입론)
 
 입론(Constructive) 라운드입니다. 다음을 수행하세요:
-- 논제에 대한 자신의 핵심 논점(contention)을 체계적으로 제시
+- 논제에 대한 **정확히 3개의 핵심 논점(contention)**을 제시
 - 각 논점에 근거와 사례를 뒷받침
 - 명확한 논증 구조(주장 → 이유 → 증거)를 사용
-- 2~3개의 핵심 논점을 중심으로 구성하세요""",
+
+**출력 구조:**
+## 논점 1: [제목]
+(주장, 이유, 증거)
+
+## 논점 2: [제목]
+(주장, 이유, 증거)
+
+## 논점 3: [제목]
+(주장, 이유, 증거)""",
 
     "cx_question": """## 현재 라운드: {round_id} (교차조사 - 질문)
 
@@ -151,7 +160,7 @@ def get_round_instructions(round_config: RoundConfig, max_speech_chars: int = 0)
         )
 
     final_note = ""
-    if round_id in ("2NR", "2AR"):
+    if round_id in ("1AR", "1NR"):
         final_note = (
             "**이것은 최종 반박입니다.** "
             "이 라운드가 자신의 마지막 발언 기회입니다. "
