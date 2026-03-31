@@ -48,7 +48,21 @@ class DebateState(TypedDict):
     verdict: NotRequired[str]
 
 
+class DebateNodeUpdate(TypedDict, total=False):
+    """노드 함수가 반환하는 부분 상태 업데이트.
+
+    total=False이므로 모든 필드가 optional — 노드가 필요한 필드만 반환 가능.
+    """
+    transcript: list[SpeechRecord]
+    current_round_index: int
+    aff_private_notes: str
+    neg_private_notes: str
+    verdict: str
+
+
 # ── CEDA 표준 라운드 시퀀스 (CX 질문/답변 분리) ──
+
+FINAL_REBUTTAL_ROUND_IDS: frozenset[str] = frozenset({"1AR", "1NR"})
 
 CEDA_ROUNDS: list[RoundConfig] = [
     {"round_id": "1AC",      "speaker": "affirmative", "speech_type": "constructive"},

@@ -6,7 +6,9 @@ CEDA 토론 프롬프트 템플릿.
 """
 from __future__ import annotations
 
-from .state import RoundConfig, SpeechRecord
+from .state import FINAL_REBUTTAL_ROUND_IDS, RoundConfig, SpeechRecord
+
+DEFAULT_SUMMARY_CHARS: int = 200
 
 
 # ── 역할별 시스템 프롬프트 ──
@@ -160,7 +162,7 @@ def get_round_instructions(round_config: RoundConfig, max_speech_chars: int = 0)
         )
 
     final_note = ""
-    if round_id in ("1AR", "1NR"):
+    if round_id in FINAL_REBUTTAL_ROUND_IDS:
         final_note = (
             "**이것은 최종 반박입니다.** "
             "이 라운드가 자신의 마지막 발언 기회입니다. "
@@ -183,7 +185,7 @@ def get_round_instructions(round_config: RoundConfig, max_speech_chars: int = 0)
 def format_transcript_for_llm(
     transcript: list[SpeechRecord],
     context_window: int = 0,
-    summary_chars: int = 200,
+    summary_chars: int = DEFAULT_SUMMARY_CHARS,
 ) -> str:
     """토론 기록을 LLM이 읽을 수 있는 텍스트로 변환한다.
 

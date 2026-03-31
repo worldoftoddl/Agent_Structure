@@ -30,8 +30,8 @@ def _resolve_llm(
     model_name: str | None,
     fallback_llm: BaseChatModel | None = None,
 ) -> BaseChatModel:
-    """프로바이더/모델명으로 LLM을 resolve한다. 미지정 시 fallback 사용."""
-    if provider_name or model_name:
+    """프로바이더/모델명으로 LLM을 resolve한다. 미지정(None) 시 fallback 사용."""
+    if provider_name is not None or model_name is not None:
         prov = provider_name or settings.default_provider
         model = model_name or settings.default_model
         return get_provider(prov, model_name=model).get_llm()

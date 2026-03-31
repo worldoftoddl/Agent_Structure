@@ -20,6 +20,7 @@ from langchain_core.messages import (
     SystemMessage,
     ToolMessage,
 )
+from langchain_core.tools import BaseTool
 
 from .prompts import (
     format_transcript_for_llm,
@@ -28,12 +29,41 @@ from .prompts import (
     get_negative_system_prompt,
     get_round_instructions,
 )
-from .state import DebateState, SpeechRecord
+from .state import DebateNodeUpdate, DebateState, SpeechRecord
 
 logger = logging.getLogger(__name__)
 
 DEFAULT_MAX_SPEECH_CHARS: int = 800
 DEFAULT_CONTEXT_WINDOW: int = 3
+
+# 문장 단위 절단 시, 마지막 문장 종결자가 전체의 이 비율 미만 위치에 있으면
+# 문장 경계를 무시하고 max_chars에서 바로 절단한다.
+_MIN_SENTENCE_RATIO: float = 0.5
+
+
+# ── LLM 응답 content 타입 안전 변환 ──
+
+
+def _extract_content(content: str | list | None) -> str:
+    """LLM response.content를 안전하게 str로 변환한다.
+
+    LangChain AIMessage.content는 str | list[str | dict] 유니온 타입이다.
+    멀티모달 모델이나 특정 프로바이더에서 list 형태로 반환될 수 있다.
+    """
+    if content is None:
+        return ""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts: list[str] = []
+        for item in content:
+            if isinstance(item, str):
+                parts.append(item)
+            elif isinstance(item, dict) and "text" in item:
+                parts.append(item["text"])
+        return "".join(parts)
+    return str(content)
+
 
 # ── 비공개 메모 파싱 ──
 
@@ -66,7 +96,7 @@ def _truncate_speech(speech: str, max_chars: int) -> str:
             last_end = i + 1
             break
 
-    if last_end > max_chars * 0.5:
+    if last_end > max_chars * _MIN_SENTENCE_RATIO:
         return truncated[:last_end].rstrip()
 
     return truncated.rstrip() + "..."
@@ -84,23 +114,29 @@ def _condense_speech(
     if len(speech) <= max_chars:
         return speech
 
-    # 목표 글자 수를 80%로 설정하여 초과 방지 여유 확보
-    target = int(max_chars * 0.8)
-    prompt = (
-        f"다음 토론 발언을 반드시 {target}자 이내로 압축하세요.\n"
-        f"현재 {len(speech)}자이며, {target}자 이하로 줄여야 합니다.\n"
-        "규칙:\n"
-        "- 핵심 논점과 근거만 남기고 수식어·반복·예시를 과감히 삭제\n"
-        "- 요약문만 출력. 서두·설명·메타 코멘트 금지\n\n"
-        f"--- 원문 ---\n{speech}"
-    )
-    response = llm.invoke([HumanMessage(content=prompt)])
-    condensed = (response.content or "").strip()
+    try:
+        # 목표 글자 수를 80%로 설정하여 초과 방지 여유 확보
+        target = int(max_chars * 0.8)
+        prompt = (
+            f"다음 토론 발언을 반드시 {target}자 이내로 압축하세요.\n"
+            f"현재 {len(speech)}자이며, {target}자 이하로 줄여야 합니다.\n"
+            "규칙:\n"
+            "- 핵심 논점과 근거만 남기고 수식어·반복·예시를 과감히 삭제\n"
+            "- 요약문만 출력. 서두·설명·메타 코멘트 금지\n\n"
+            f"--- 원문 ---\n{speech}"
+        )
+        response = llm.invoke([HumanMessage(content=prompt)])
+        condensed = _extract_content(response.content).strip()
 
-    if len(condensed) > max_chars:
-        logger.warning("LLM 요약도 %d자 초과 → 강제 절단", len(condensed))
-        return _truncate_speech(condensed, max_chars)
-    return condensed
+        if len(condensed) > max_chars:
+            logger.warning("LLM 요약도 %d자 초과 → 강제 절단", len(condensed))
+            return _truncate_speech(condensed, max_chars)
+        return condensed
+    except (KeyboardInterrupt, SystemExit):
+        raise
+    except Exception:
+        logger.warning("LLM 요약 호출 실패 → 강제 절단으로 폴백", exc_info=True)
+        return _truncate_speech(speech, max_chars)
 
 
 # ── 도구 호출 루프 ──
@@ -126,7 +162,7 @@ def _invoke_with_tools(
         messages.append(response)
 
         if not response.tool_calls:
-            return response.content or ""
+            return _extract_content(response.content)
 
         for tc in response.tool_calls:
             tool_fn = tool_map.get(tc["name"])
@@ -134,7 +170,10 @@ def _invoke_with_tools(
                 result = f"Error: tool '{tc['name']}' not found"
             else:
                 try:
-                    result = tool_fn.invoke(tc["args"])
+                    if isinstance(tool_fn, BaseTool):
+                        result = tool_fn.invoke(tc["args"])
+                    else:
+                        result = tool_fn(**tc["args"])
                 except (KeyboardInterrupt, SystemExit):
                     raise
                 except Exception as e:
@@ -149,7 +188,7 @@ def _invoke_with_tools(
 
     # max_iterations 도달 시 도구 미바인딩 LLM으로 최종 텍스트 응답 유도
     final = llm.invoke(messages)
-    return final.content or ""
+    return _extract_content(final.content)
 
 
 # ── 노드 함수 팩토리 ──
@@ -160,13 +199,13 @@ def create_debate_node(
     tools: list[Callable] | None = None,
     max_speech_chars: int = DEFAULT_MAX_SPEECH_CHARS,
     context_window: int = DEFAULT_CONTEXT_WINDOW,
-) -> Callable[[DebateState], dict]:
+) -> Callable[[DebateState], DebateNodeUpdate]:
     """토론 발언 노드 함수를 생성한다.
 
     클로저로 LLM 인스턴스와 도구를 캡처한다.
     """
 
-    def debate_node(state: DebateState) -> dict:
+    def debate_node(state: DebateState) -> DebateNodeUpdate:
         idx = state["current_round_index"]
         round_cfg = state["round_sequence"][idx]
         speaker = round_cfg["speaker"]
@@ -213,7 +252,7 @@ def create_debate_node(
             raw_response = _invoke_with_tools(llm, messages, tools)
         else:
             response = llm.invoke(messages)
-            raw_response = response.content or ""
+            raw_response = _extract_content(response.content)
 
         # 공개 발언과 비공개 메모 분리
         speech_content, updated_notes = _parse_speech_and_notes(raw_response)
@@ -230,7 +269,7 @@ def create_debate_node(
         logger.info("토론 라운드 완료: %s (%d자)", round_id, len(speech_content))
 
         # 상태 업데이트
-        update: dict[str, Any] = {
+        update: DebateNodeUpdate = {
             "transcript": [
                 SpeechRecord(
                     round_id=round_id,
@@ -254,10 +293,10 @@ def create_debate_node(
 
 def create_judge_node(
     judge_llm: BaseChatModel,
-) -> Callable[[DebateState], dict]:
+) -> Callable[[DebateState], DebateNodeUpdate]:
     """심판 판정 노드 함수를 생성한다."""
 
-    def judge_node(state: DebateState) -> dict:
+    def judge_node(state: DebateState) -> DebateNodeUpdate:
         logger.info("심판 판정 시작")
 
         system_prompt = get_judge_system_prompt(state["proposition"])
@@ -274,7 +313,7 @@ def create_judge_node(
         ]
 
         response = judge_llm.invoke(messages)
-        verdict = response.content or ""
+        verdict = _extract_content(response.content)
 
         logger.info("심판 판정 완료 (%d자)", len(verdict))
 
